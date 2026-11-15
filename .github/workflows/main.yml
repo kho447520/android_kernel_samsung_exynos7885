@@ -20,12 +20,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
 
-      - name: Build Kernel Directly
+      - name: Setup Toolchain
+        run: |
+          # Tải Clang và GCC cần thiết cho kernel 4.4
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git /tmp/clang
+          export PATH="/tmp/clang/bin:$PATH"
+
+      - name: Build Kernel
         env:
           KCONFIG_ALLCONFIG: "1"
         run: |
-          make ARCH=arm64 a10.config
+          # 1. Sử dụng file defconfig gốc của dòng máy làm nền
+          make ARCH=arm64 exynos7885_defconfig
+          
+          # 2. Trộn file a10.config của bạn vào để thêm các tính năng riêng cho A10
+          ./scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/a10.config
+          
+          # 3. Tự động chốt cấu hình (KHÔNG BAO GIỜ HỎI Y/N)
           make ARCH=arm64 olddefconfig
+          
+          # 4. Tiến hành build
           make ARCH=arm64 -j$(nproc) Image
 
       - name: Upload Image
