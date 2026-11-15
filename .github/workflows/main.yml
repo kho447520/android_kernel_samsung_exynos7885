@@ -1,0 +1,42 @@
+name: Build Kernel Android 12
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          repository: kho447520/android_kernel_samsung_exynos7885
+          ref: Hi
+          fetch-depth: 1
+
+      - name: Setup Toolchain and Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+          
+      - name: Fix Config and Build
+        env:
+          # Biến này báo cho kernel biết: "Nếu có cấu hình mới, cứ lấy mặc định, đừng hỏi"
+          KCONFIG_ALLCONFIG: "1"
+        run: |
+          # 1. Tạo file .config từ file a10.config của bạn
+          make ARCH=arm64 a10.config
+          
+          # 2. Dùng lệnh olddefconfig (tự động chọn mặc định, KHÔNG BAO GIỜ HỎI)
+          make ARCH=arm64 olddefconfig
+          
+          # 3. Bắt đầu build (thay đổi số luồng -j cho phù hợp)
+          make ARCH=arm64 -j$(nproc) Image
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Image
+          path: arch/arm64/boot/Image
