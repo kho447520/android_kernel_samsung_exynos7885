@@ -1,4 +1,5 @@
-name: Build Kernel
+
+name: Build Kernel A10
 
 on:
   workflow_dispatch:
@@ -6,7 +7,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
 
     steps:
       - name: Checkout Source
@@ -18,23 +18,54 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex gcc-aarch64-linux-gnu git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libssl-dev libelf-dev
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex \
+            gcc-aarch64-linux-gnu git gnupg gperf \
+            imagemagick lib32ncurses5-dev lib32readline-dev \
+            lib32z1-dev liblz4-tool libncurses-dev \
+            libssl-dev libelf-dev zip
 
       - name: Build Kernel
         env:
           KCONFIG_ALLCONFIG: "1"
         run: |
-          # Configure the kernel for the target device.
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- exynos7885_defconfig
 
-          # Merge the A10-specific options and normalize the configuration.
           ./scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/a10.config
+
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
-          # Build with the installed ARM64 cross-compiler.
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
 
-      - name: Upload Image
+      - name: Prepare AnyKernel3
+        run: |
+          if [ ! -d AnyKernel3 ]; then
+            echo "AnyKernel3 directory not found!"
+            exit 1
+          fi
+
+          mkdir -p AnyKernel3
+
+          cp arch/arm64/boot/Image AnyKernel3/Image
+
+          if [ -f arch/arm64/boot/dtb ]; then
+            cp arch/arm64/boot/dtb AnyKernel3/dtb
+          fi
+
+      - name: Package Kernel
+        run: |
+          cd AnyKernel3
+          zip -r9 ../Kernel-A10-Exynos7885.zip . \
+            -x "*.git*" "*.md"
+
+      - name: Upload Kernel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-A10-Exynos7885
+          path: Kernel-A10-Exynos7885.zip
+          if-no-files-found: error
+
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Image
