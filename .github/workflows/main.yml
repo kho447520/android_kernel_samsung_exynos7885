@@ -9,42 +9,72 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # Checkout source
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           ref: Hi
           fetch-depth: 1
 
+      # Install dependencies
       - name: Install Dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache curl flex \
-            gcc-aarch64-linux-gnu git gnupg gperf \
-            imagemagick lib32ncurses5-dev lib32readline-dev \
-            lib32z1-dev liblz4-tool libncurses-dev \
-            libssl-dev libelf-dev zip
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses5-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            liblz4-tool \
+            libncurses-dev \
+            libssl-dev \
+            libelf-dev \
+            zip \
+            unzip
 
+      # Build kernel
       - name: Build Kernel
-        env:
-          KCONFIG_ALLCONFIG: "1"
         run: |
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- exynos7885_defconfig
+          set -e
 
-          ./scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/a10.config
+          make ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            exynos7885_defconfig
 
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          ./scripts/kconfig/merge_config.sh \
+            -m .config \
+            arch/arm64/configs/a10.config
 
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
+          make ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            olddefconfig
 
+          make ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            -j"$(nproc)" Image
+
+          test -f arch/arm64/boot/Image
+
+      # Prepare AnyKernel3
       - name: Prepare AnyKernel3
         run: |
-          if [ ! -d AnyKernel3 ]; then
-            echo "AnyKernel3 directory not found!"
+          set -e
+
+          if [ ! -f AnyKernel3/anykernel.sh ]; then
+            echo "ERROR: AnyKernel3/anykernel.sh not found!"
             exit 1
           fi
-
-          mkdir -p AnyKernel3
 
           cp arch/arm64/boot/Image AnyKernel3/Image
 
@@ -52,21 +82,30 @@ jobs:
             cp arch/arm64/boot/dtb AnyKernel3/dtb
           fi
 
+          echo "Kernel Image prepared successfully"
+
+      # Package ZIP
       - name: Package Kernel
         run: |
+          set -e
+
           cd AnyKernel3
+
           zip -r9 ../Kernel-A10-Exynos7885.zip . \
             -x "*.git*" "*.md"
 
+          cd ..
+
+          unzip -t Kernel-A10-Exynos7885.zip
+
+          echo "ZIP package created successfully"
+
+      # Upload final ZIP
       - name: Upload Kernel ZIP
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-A10-Exynos7885
           path: Kernel-A10-Exynos7885.zip
           if-no-files-found: error
-
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-Image
-          path: arch/arm64/boot/Image
+          compression-level: 0
+          retention-days: 7
