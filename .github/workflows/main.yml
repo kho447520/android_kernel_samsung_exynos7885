@@ -9,10 +9,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # Checkout source
+      # Checkout kernel source
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
+          repository: kho447520/android_kernel_samsung_exynos7885
           ref: Hi
           fetch-depth: 1
 
@@ -20,30 +21,13 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            ccache \
-            curl \
-            flex \
-            gcc-aarch64-linux-gnu \
-            git \
-            gnupg \
-            gperf \
-            imagemagick \
-            lib32ncurses5-dev \
-            lib32readline-dev \
-            lib32z1-dev \
-            liblz4-tool \
-            libncurses-dev \
-            libssl-dev \
-            libelf-dev \
-            zip \
-            unzip
+            bc bison build-essential ccache curl flex \
+            gcc-aarch64-linux-gnu git gnupg gperf \
+            imagemagick libncurses-dev libssl-dev \
+            libelf-dev liblz4-tool zip unzip
 
-      # Build kernel
+      # Configure and build
       - name: Build Kernel
         run: |
           set -e
@@ -64,43 +48,77 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             -j"$(nproc)" Image
 
-          test -f arch/arm64/boot/Image
+          test -s arch/arm64/boot/Image
 
-      # Prepare AnyKernel3
-      - name: Prepare AnyKernel3
+      # Download AnyKernel3 packaging source
+      - name: Clone AnyKernel3
+        run: |
+          git clone --depth=1 \
+            https://github.com/Roynas-Android-Playground/kernel_packaging_anykernel3.git \
+            AnyKernel3
+
+          test -f AnyKernel3/anykernel.sh
+          test -f AnyKernel3/tools/ak3-core.sh
+
+      # Configure AnyKernel3 for A10
+      - name: Configure AnyKernel3
+        run: |
+          cat > AnyKernel3/anykernel.sh << 'EOF'
+          #!/sbin/sh
+
+          properties() { '
+          kernel.string=Exynos7885 Kernel for Samsung A10
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=a10
+          '; }
+
+          boot_attributes() {
+            :
+          }
+
+          BLOCK=boot;
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+
+          chmod 755 AnyKernel3/anykernel.sh
+
+      # Copy kernel Image
+      - name: Copy Kernel Image
         run: |
           set -e
 
-          if [ ! -f AnyKernel3/anykernel.sh ]; then
-            echo "ERROR: AnyKernel3/anykernel.sh not found!"
-            exit 1
-          fi
-
           cp arch/arm64/boot/Image AnyKernel3/Image
 
-          if [ -f arch/arm64/boot/dtb ]; then
-            cp arch/arm64/boot/dtb AnyKernel3/dtb
-          fi
-
-          echo "Kernel Image prepared successfully"
+          ls -lh AnyKernel3/Image
 
       # Package ZIP
-      - name: Package Kernel
+      - name: Package Kernel ZIP
         run: |
           set -e
 
           cd AnyKernel3
 
           zip -r9 ../Kernel-A10-Exynos7885.zip . \
-            -x "*.git*" "*.md"
+            -x ".git/*" ".git*" "README.md"
 
           cd ..
 
           unzip -t Kernel-A10-Exynos7885.zip
 
-          echo "ZIP package created successfully"
+          ls -lh Kernel-A10-Exynos7885.zip
 
-      # Upload final ZIP
+      # Upload one artifact
       - name: Upload Kernel ZIP
         uses: actions/upload-artifact@v4
         with:
