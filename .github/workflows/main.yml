@@ -1,5 +1,5 @@
 
-name: Build Kernel A10
+name: Build Kernel A10 - Clang 24
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # Checkout kernel source
+      # 1. Checkout kernel source
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
@@ -17,23 +17,49 @@ jobs:
           ref: Hi
           fetch-depth: 1
 
-      # Install dependencies
+      # 2. Install dependencies
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential ccache curl flex \
-            gcc-aarch64-linux-gnu git gnupg gperf \
-            imagemagick libncurses-dev libssl-dev \
-            libelf-dev liblz4-tool zip unzip
+            git gnupg gperf imagemagick \
+            libncurses-dev libssl-dev libelf-dev \
+            liblz4-tool zip unzip zstd wget patchelf
 
-      # Configure and build
+      # 3. Download Neutron Clang 24
+      - name: Download Clang 24
+        run: |
+          set -e
+
+          mkdir -p "$GITHUB_WORKSPACE/toolchains/neutron-clang"
+          cd "$GITHUB_WORKSPACE/toolchains/neutron-clang"
+
+          curl -fLo antman \
+            https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
+
+          chmod +x antman
+
+          # Download Clang 24.0.0git
+          ./antman -S=06092026
+
+          # Patch host library compatibility
+          ./antman --patch=glibc
+
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      # 4. Check compiler
+      - name: Check Clang Version
+        run: |
+          clang --version
+          which clang
+
+      # 5. Configure and build kernel
       - name: Build Kernel
         run: |
           set -e
 
           make ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
             exynos7885_defconfig
 
           ./scripts/kconfig/merge_config.sh \
@@ -41,89 +67,139 @@ jobs:
             arch/arm64/configs/a10.config
 
           make ARCH=arm64 \
+            CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
           make ARCH=arm64 \
+            CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             -j"$(nproc)" Image
 
           test -s arch/arm64/boot/Image
 
-      # Download AnyKernel3 packaging source
+      # 6. Download AnyKernel3 packaging
       - name: Clone AnyKernel3
         run: |
+          set -e
+
           git clone --depth=1 \
             https://github.com/Roynas-Android-Playground/kernel_packaging_anykernel3.git \
             AnyKernel3
 
-          test -f AnyKernel3/anykernel.sh
           test -f AnyKernel3/tools/ak3-core.sh
 
-      # Configure AnyKernel3 for A10
-      - name: Configure AnyKernel3
+      # 7. Install Eureka AnyKernel script
+      - name: Configure Eureka AnyKernel3
         run: |
-          cat > AnyKernel3/anykernel.sh << 'EOF'
-          #!/sbin/sh
+          cat > AnyKernel3/anykernel.sh << 'AK3EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # osm0sis @ xda-developers
 
+          ## AnyKernel setup
           properties() { '
-          kernel.string=Exynos7885 Kernel for Samsung A10
-          do.devicecheck=1
+          kernel.string=Eureka Kernel by Eureka Team
+          do.devicecheck=0
           do.modules=0
-          do.systemless=0
+          do.systemless=1
           do.cleanup=1
           do.cleanuponabort=0
-          device.name1=a10
+          device.name1=
+          device.name2=
+          device.name3=
+          device.name4=
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
           '; }
 
-          boot_attributes() {
-            :
-          }
+          # shell variables
+          if [ -e /dev/block/platform/13500000.dwmmc0/by-name/BOOT ]; then
+            block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT;
+          elif [ -e /dev/block/platform/13500000.dwmmc0/by-name/boot ]; then
+            block=/dev/block/platform/13500000.dwmmc0/by-name/boot;
+          fi
 
-          BLOCK=boot;
-          IS_SLOT_DEVICE=0;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
+          is_slot_device=0;
+          ramdisk_compression=auto;
 
+          ## AnyKernel methods
           . tools/ak3-core.sh;
 
-          dump_boot;
-          write_boot;
-          EOF
+          ## AnyKernel file attributes
+          set_perm_recursive 0 0 755 644 $ramdisk/*;
+          set_perm_recursive 0 0 750 750 $ramdisk/init* $ramdisk/sbin;
+
+          ## AnyKernel install
+          split_boot;
+
+          ui_print "- Installing Eureka kernel";
+          flash_boot;
+
+          ui_print "- Installing/updating Eureka dtb";
+          flash_dtb;
+
+          ui_print "- Installing/updating Eureka dtbo";
+          flash_dtbo;
+
+          ## Optional Eureka files
+          if [ -f /tmp/anykernel/tools/espectrum.zip ]; then
+            cp /tmp/anykernel/tools/espectrum.zip \
+              /data/media/0/enable_spectrum_support.zip;
+            chmod 755 /data/media/0/enable_spectrum_support.zip;
+          fi
+
+          if [ -f /tmp/anykernel/tools/changelog.txt ]; then
+            cp /tmp/anykernel/tools/changelog.txt \
+              /data/media/0/changelog.txt;
+            chmod 755 /data/media/0/changelog.txt;
+          fi
+
+          ui_print "- Installation finished successfully";
+          ui_print "- Thank you for using Eureka Kernel :)";
+
+          ## end install
+          AK3EOF
 
           chmod 755 AnyKernel3/anykernel.sh
 
-      # Copy kernel Image
-      - name: Copy Kernel Image
+      # 8. Copy kernel files
+      - name: Copy Kernel Files
         run: |
           set -e
 
           cp arch/arm64/boot/Image AnyKernel3/Image
 
-          ls -lh AnyKernel3/Image
+          if [ -f arch/arm64/boot/dtb ]; then
+            cp arch/arm64/boot/dtb AnyKernel3/dtb
+          fi
 
-      # Package ZIP
-      - name: Package Kernel ZIP
+          if [ -f arch/arm64/boot/dtbo.img ]; then
+            cp arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          fi
+
+          ls -lh AnyKernel3/
+
+      # 9. Package ZIP
+      - name: Package Eureka Kernel
         run: |
           set -e
 
           cd AnyKernel3
 
-          zip -r9 ../Kernel-A10-Exynos7885.zip . \
-            -x ".git/*" ".git*" "README.md"
+          zip -r9 ../Kernel-A10-Eureka-Clang24.zip . \
+            -x "*.git*" "*.md"
 
           cd ..
 
-          unzip -t Kernel-A10-Exynos7885.zip
+          unzip -t Kernel-A10-Eureka-Clang24.zip
 
-          ls -lh Kernel-A10-Exynos7885.zip
-
-      # Upload one artifact
+      # 10. Upload one ZIP only
       - name: Upload Kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-A10-Exynos7885
-          path: Kernel-A10-Exynos7885.zip
+          name: Kernel-A10-Eureka-Clang24
+          path: Kernel-A10-Eureka-Clang24.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
