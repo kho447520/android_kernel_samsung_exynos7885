@@ -1,4 +1,3 @@
-
 name: Build Kernel A10 - Clang 24
 
 on:
@@ -25,7 +24,8 @@ jobs:
             bc bison build-essential ccache curl flex \
             git gnupg gperf imagemagick \
             libncurses-dev libssl-dev libelf-dev \
-            liblz4-tool zip unzip zstd wget patchelf
+            liblz4-tool zip unzip zstd wget patchelf \
+            binutils-aarch64-linux-gnu
 
       # 3. Download Neutron Clang 24
       - name: Download Clang 24
@@ -48,11 +48,13 @@ jobs:
 
           echo "$PWD/bin" >> "$GITHUB_PATH"
 
-      # 4. Check compiler
-      - name: Check Clang Version
+      # 4. Check compiler and cross-linker
+      - name: Check Compiler and Cross-Linker
         run: |
           clang --version
           which clang
+          aarch64-linux-gnu-ld --version
+          which aarch64-linux-gnu-ld
 
       # 5. Configure and build kernel
       - name: Build Kernel
@@ -119,7 +121,6 @@ jobs:
           elif [ -e /dev/block/platform/13500000.dwmmc0/by-name/boot ]; then
             block=/dev/block/platform/13500000.dwmmc0/by-name/boot;
           fi
-
           is_slot_device=0;
           ramdisk_compression=auto;
 
@@ -194,7 +195,7 @@ jobs:
 
           unzip -t Kernel-A10-Eureka-Clang24.zip
 
-      # 10. Upload one ZIP only
+      # 10. Upload ZIP
       - name: Upload Kernel ZIP
         uses: actions/upload-artifact@v4
         with:
